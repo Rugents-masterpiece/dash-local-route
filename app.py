@@ -17,7 +17,7 @@ ROOT = Path(__file__).parent
 ASSETS = {
     "logo-cpu.svg", "logo-nvidia.svg", "logo-amd.svg", "logo-ram.svg",
     "logo-orbit.svg", "logo-hermes.svg", "logo-openwebui.svg", "logo-openviking.svg",
-    "logo-litellm.svg", "logo-searxng.svg", "logo-peppol.png", "logo-portainer.svg",
+    'logo-litellm.svg', 'logo-searxng.svg', 'logo-euro.svg', 'logo-portainer.svg',
 }
 HOST = os.environ.get("DASH_HOST", "0.0.0.0")
 PORT = int(os.environ.get("DASH_PORT", "8090"))
