@@ -15,6 +15,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("SearXNG", names)
         self.assertIn("Templator Peppol", names)
         self.assertEqual(next(s for s in services if s["name"] == "LiteLLM")["url"], "http://192.168.16.42:4000/ui/")
+        self.assertTrue(next(s for s in services if s["name"] == "Firecrawl API")["kind"] == "api")
         self.assertTrue(all(service["url"].startswith("http") for service in services))
 
     def test_format_bytes_is_human_readable(self):
