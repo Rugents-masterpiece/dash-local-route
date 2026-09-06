@@ -65,6 +65,55 @@ def _cpu_percent() -> float:
     return round(100 * (1 - (idle_b - idle_a) / total), 1) if total else 0.0
 
 
+def _parse_gpu_utilization(output: str, vendor: str) -> dict:
+    """Parse a `name, utilization` line into a dashboard metric."""
+    for line in output.splitlines():
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) < 2:
+            continue
+        try:
+            percent = float(fields[-1].rstrip("%"))
+        except ValueError:
+            continue
+        return {"vendor": vendor, "percent": percent, "available": True}
+    return {"vendor": vendor, "percent": None, "available": False}
+
+
+def _read_nvidia_gpu() -> dict:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,utilization.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, check=True, timeout=2,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return _parse_gpu_utilization("", "NVIDIA")
+    metrics = [_parse_gpu_utilization(line, "NVIDIA") for line in result.stdout.splitlines()]
+    available = [metric["percent"] for metric in metrics if metric["available"]]
+    if not available:
+        return _parse_gpu_utilization("", "NVIDIA")
+    return {"vendor": "NVIDIA", "percent": round(sum(available) / len(available), 1), "available": True}
+
+
+def _read_amd_gpu() -> dict:
+    values = []
+    for vendor_path in sorted(Path("/sys/class/drm").glob("card[0-9]*/device/vendor")):
+        try:
+            if vendor_path.read_text().strip().lower() != "0x1002":
+                continue
+            busy_path = vendor_path.parent / "gpu_busy_percent"
+            values.append(float(busy_path.read_text().strip()))
+        except (OSError, ValueError):
+            continue
+    if not values:
+        return _parse_gpu_utilization("", "AMD")
+    return {"vendor": "AMD", "percent": round(sum(values) / len(values), 1), "available": True}
+
+
+def read_gpu_stats() -> dict:
+    """Return independent NVIDIA and AMD utilization metrics."""
+    return {"nvidia": _read_nvidia_gpu(), "amd": _read_amd_gpu()}
+
+
 def _processes() -> list[dict]:
     try:
         result = subprocess.run(["ps", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu", "--no-headers"], capture_output=True, text=True, check=True)
@@ -83,7 +132,7 @@ def read_system_stats() -> dict:
     total = mem.get("MemTotal", 0)
     available = mem.get("MemAvailable", mem.get("MemFree", 0))
     used = max(total - available, 0)
-    return {"memory": {"total": total, "used": used, "available": available, "used_percent": round(100 * used / total, 1) if total else 0}, "cpu_percent": _cpu_percent(), "processes": _processes(), "updated_at": int(time.time())}
+    return {"memory": {"total": total, "used": used, "available": available, "used_percent": round(100 * used / total, 1) if total else 0}, "cpu_percent": _cpu_percent(), "gpu": read_gpu_stats(), "processes": _processes(), "updated_at": int(time.time())}
 
 
 def discover_services() -> list[dict]:

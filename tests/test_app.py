@@ -31,6 +31,30 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("cpu_percent", stats)
         self.assertIn("processes", stats)
 
+    def test_system_stats_have_separate_nvidia_and_amd_gpu_metrics(self):
+        stats = read_system_stats()
+        self.assertIn("gpu", stats)
+        self.assertIn("nvidia", stats["gpu"])
+        self.assertIn("amd", stats["gpu"])
+        for vendor in ("nvidia", "amd"):
+            metric = stats["gpu"][vendor]
+            self.assertIn("percent", metric)
+            self.assertIn("available", metric)
+            self.assertTrue(metric["percent"] is None or isinstance(metric["percent"], (int, float)))
+
+    def test_parse_gpu_utilization_keeps_vendor_values_separate(self):
+        from app import _parse_gpu_utilization
+
+        parsed = _parse_gpu_utilization("NVIDIA GeForce RTX 4060 Ti, 37\n", "NVIDIA")
+        self.assertEqual(parsed["vendor"], "NVIDIA")
+        self.assertEqual(parsed["percent"], 37.0)
+        self.assertTrue(parsed["available"])
+
+        unavailable = _parse_gpu_utilization("", "AMD")
+        self.assertEqual(unavailable["vendor"], "AMD")
+        self.assertIsNone(unavailable["percent"])
+        self.assertFalse(unavailable["available"])
+
 
 if __name__ == "__main__":
     unittest.main()
