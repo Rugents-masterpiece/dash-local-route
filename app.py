@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import re
 import subprocess
@@ -13,6 +14,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+ASSETS = {
+    "logo-cpu.svg", "logo-nvidia.svg", "logo-amd.svg", "logo-ram.svg",
+    "logo-orbit.svg", "logo-hermes.svg", "logo-openwebui.svg", "logo-openviking.svg",
+    "logo-litellm.svg", "logo-searxng.svg", "logo-peppol.png", "logo-portainer.svg",
+}
 HOST = os.environ.get("DASH_HOST", "0.0.0.0")
 PORT = int(os.environ.get("DASH_PORT", "8090"))
 SERVICES = [
@@ -177,6 +183,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path.startswith("/assets/"):
+            asset_name = self.path.removeprefix("/assets/")
+            if asset_name not in ASSETS:
+                self.send_error(404)
+                return
+            body = (ROOT / "assets" / asset_name).read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", mimetypes.guess_type(asset_name)[0] or "application/octet-stream")
+            self.send_header("Cache-Control", "public, max-age=86400")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
