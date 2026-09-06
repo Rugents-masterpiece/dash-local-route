@@ -9,6 +9,10 @@ class DashboardTests(unittest.TestCase):
         ports = {service["port"] for service in services}
         self.assertIn(7878, ports)
         self.assertIn(9119, ports)
+        names = {service["name"] for service in services}
+        self.assertIn("LiteLLM", names)
+        self.assertIn("Portainer", names)
+        self.assertEqual(next(s for s in services if s["name"] == "LiteLLM")["url"], "http://192.168.16.42:4000/ui/")
         self.assertTrue(all(service["url"].startswith("http") for service in services))
 
     def test_format_bytes_is_human_readable(self):

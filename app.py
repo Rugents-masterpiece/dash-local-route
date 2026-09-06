@@ -20,9 +20,9 @@ SERVICES = [
     {"name": "Open WebUI", "description": "Webové rozhranie pre AI", "url": "http://127.0.0.1:3080/", "port": 3080, "scheme": "http"},
     {"name": "OpenViking Studio", "description": "Lokálne znalostné úložisko", "url": "http://127.0.0.1:1933/studio/", "port": 1933, "scheme": "http"},
     {"name": "Firecrawl API", "description": "Lokálne API pre webový obsah", "url": "http://127.0.0.1:3002/", "port": 3002, "scheme": "http"},
-    {"name": "API služba", "description": "Lokálna API dokumentácia", "url": "http://127.0.0.1:4000/", "port": 4000, "scheme": "http"},
+    {"name": "LiteLLM", "description": "Dashboard pre lokálny LLM proxy", "url": "http://192.168.16.42:4000/ui/", "check_url": "http://127.0.0.1:4000/ui/", "port": 4000, "scheme": "http"},
     {"name": "Notebook", "description": "Lokálne notebookové rozhranie", "url": "http://127.0.0.1:8888/", "port": 8888, "scheme": "http"},
-    {"name": "Bezpečná lokálna služba", "description": "HTTPS služba na tomto PC", "url": "https://127.0.0.1:9443/", "port": 9443, "scheme": "https"},
+    {"name": "Portainer", "description": "Správa Docker kontajnerov · vyžaduje reštart", "url": "https://192.168.16.42:9443/", "check_url": "https://127.0.0.1:9443/", "port": 9443, "scheme": "https"},
 ]
 
 
@@ -83,7 +83,7 @@ def discover_services() -> list[dict]:
     services = []
     for item in SERVICES:
         entry = dict(item)
-        request = urllib.request.Request(item["url"], headers={"User-Agent": "dash-local-route/1.0"})
+        request = urllib.request.Request(item.get("check_url", item["url"]), headers={"User-Agent": "dash-local-route/1.0"})
         started = time.perf_counter()
         try:
             context = None
