@@ -42,6 +42,14 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("available", metric)
             self.assertTrue(metric["percent"] is None or isinstance(metric["percent"], (int, float)))
 
+    def test_parse_radeontop_utilization(self):
+        from app import _parse_radeontop_utilization
+
+        metric = _parse_radeontop_utilization("123.4: bus 23, gpu 12.50%, ee 0.00%")
+        self.assertEqual(metric["vendor"], "AMD")
+        self.assertEqual(metric["percent"], 12.5)
+        self.assertTrue(metric["available"])
+
     def test_parse_gpu_utilization_keeps_vendor_values_separate(self):
         from app import _parse_gpu_utilization
 

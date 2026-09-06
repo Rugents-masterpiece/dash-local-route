@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -79,6 +80,13 @@ def _parse_gpu_utilization(output: str, vendor: str) -> dict:
     return {"vendor": vendor, "percent": None, "available": False}
 
 
+def _parse_radeontop_utilization(output: str) -> dict:
+    match = re.search(r"\bgpu\s+([0-9]+(?:\.[0-9]+)?)%", output)
+    if not match:
+        return _parse_gpu_utilization("", "AMD")
+    return {"vendor": "AMD", "percent": float(match.group(1)), "available": True}
+
+
 def _read_nvidia_gpu() -> dict:
     try:
         result = subprocess.run(
@@ -105,7 +113,14 @@ def _read_amd_gpu() -> dict:
         except (OSError, ValueError):
             continue
     if not values:
-        return _parse_gpu_utilization("", "AMD")
+        try:
+            result = subprocess.run(
+                ["radeontop", "-d", "-", "-l", "1"],
+                capture_output=True, text=True, check=True, timeout=3,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return _parse_gpu_utilization("", "AMD")
+        return _parse_radeontop_utilization(result.stdout)
     return {"vendor": "AMD", "percent": round(sum(values) / len(values), 1), "available": True}
 
 
