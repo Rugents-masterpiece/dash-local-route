@@ -17,8 +17,15 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("Qwen Prisma", names)
         self.assertIn("Nemo Rugent", names)
         self.assertIn("Hermes Gateway API", names)
+        self.assertIn("Prometheus", names)
+        self.assertIn("cAdvisor", names)
+        self.assertIn("Grafana · Hetzner Cloud", names)
         self.assertEqual(next(s for s in services if s["name"] == "LiteLLM")["url"], "http://192.168.16.42:4000/ui/")
+        self.assertEqual(next(s for s in services if s["name"] == "Prometheus")["url"], "http://192.168.16.42:9090")
+        self.assertEqual(next(s for s in services if s["name"] == "cAdvisor")["url"], "http://192.168.16.42:8080/metrics")
+        self.assertEqual(next(s for s in services if s["name"] == "Grafana · Hetzner Cloud")["url"], "http://192.168.16.164:3000/d/ad7ghz7/my-htzner-dash?from=now-6h&to=now&timezone=browser&var-filter0=&dtab=New-tab")
         self.assertTrue(next(s for s in services if s["name"] == "Firecrawl API")["kind"] == "api")
+        self.assertTrue(next(s for s in services if s["name"] == "cAdvisor")["kind"] == "api")
         self.assertTrue(all(service["url"].startswith("http") for service in services))
 
     def test_format_bytes_is_human_readable(self):

@@ -37,6 +37,9 @@ SERVICES = [
     {"name": "SearXNG", "description": "Lokálny metavyhľadávač", "url": "http://192.168.16.42:8888/", "check_url": "http://127.0.0.1:8888/", "port": 8888, "scheme": "http"},
     {"name": "Templator Peppol", "description": "Vizualizácia elektronických faktúr", "url": "http://192.168.16.42:10001/", "check_url": "http://127.0.0.1:10001/", "port": 10001, "scheme": "http"},
     {"name": "Portainer", "description": "Správa Docker kontajnerov · vyžaduje reštart", "url": "https://192.168.16.42:9443/", "check_url": "https://127.0.0.1:9443/", "port": 9443, "scheme": "https"},
+    {"name": "Prometheus", "description": "Monitorovanie a časové rady", "url": "http://192.168.16.42:9090", "port": 9090, "scheme": "http"},
+    {"name": "cAdvisor", "description": "Metriky Docker kontajnerov · metrics endpoint", "url": "http://192.168.16.42:8080/metrics", "port": 8080, "scheme": "http", "kind": "api"},
+    {"name": "Grafana · Hetzner Cloud", "description": "Metriky Hetzner Cloud servera", "url": "http://192.168.16.164:3000/d/ad7ghz7/my-htzner-dash?from=now-6h&to=now&timezone=browser&var-filter0=&dtab=New-tab", "port": 3000, "scheme": "http"},
 ]
 
 
