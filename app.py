@@ -76,12 +76,40 @@ def _cpu_percent() -> float:
 
 
 def _unavailable_gpu(vendor: str) -> dict:
-    return {"vendor": vendor, "percent": None, "vram_used": None, "vram_total": None, "vram_percent": None, "available": False}
+    return {"vendor": vendor, "percent": None, "temperature_c": None, "vram_used": None, "vram_total": None, "vram_percent": None, "available": False}
 
 
-def _gpu_metric(vendor: str, percent: float, vram_used: float | None = None, vram_total: float | None = None) -> dict:
+def _gpu_metric(vendor: str, percent: float, vram_used: float | None = None, vram_total: float | None = None, temperature_c: float | None = None) -> dict:
     vram_percent = round(100 * vram_used / vram_total, 1) if vram_used is not None and vram_total else None
-    return {"vendor": vendor, "percent": round(percent, 1), "vram_used": vram_used, "vram_total": vram_total, "vram_percent": vram_percent, "available": True}
+    return {"vendor": vendor, "percent": round(percent, 1), "temperature_c": temperature_c, "vram_used": vram_used, "vram_total": vram_total, "vram_percent": vram_percent, "available": True}
+
+
+def _read_cpu_temperature() -> float | None:
+    for hwmon in sorted(Path("/sys/class/hwmon").glob("hwmon*")):
+        try:
+            if (hwmon / "name").read_text().strip() != "k10temp":
+                continue
+            for input_path in sorted(hwmon.glob("temp*_input")):
+                label_path = input_path.with_name(input_path.name.replace("_input", "_label"))
+                if label_path.exists() and label_path.read_text().strip() == "Tctl":
+                    return round(float(input_path.read_text().strip()) / 1000, 1)
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def _read_amd_temperature() -> float | None:
+    for hwmon in sorted(Path("/sys/class/hwmon").glob("hwmon*")):
+        try:
+            if (hwmon / "name").read_text().strip() != "amdgpu":
+                continue
+            for input_path in sorted(hwmon.glob("temp*_input")):
+                label_path = input_path.with_name(input_path.name.replace("_input", "_label"))
+                if label_path.exists() and label_path.read_text().strip() == "edge":
+                    return round(float(input_path.read_text().strip()) / 1000, 1)
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _parse_gpu_utilization(output: str, vendor: str) -> dict:
@@ -114,7 +142,7 @@ def _parse_radeontop_utilization(output: str) -> dict:
 def _read_nvidia_gpu() -> dict:
     try:
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, check=True, timeout=2,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -122,10 +150,10 @@ def _read_nvidia_gpu() -> dict:
     metrics = []
     for line in result.stdout.splitlines():
         fields = [field.strip() for field in line.split(",")]
-        if len(fields) < 4:
+        if len(fields) < 5:
             continue
         try:
-            metrics.append(_gpu_metric("NVIDIA", float(fields[1]), float(fields[2]) * 1024 * 1024, float(fields[3]) * 1024 * 1024))
+            metrics.append(_gpu_metric("NVIDIA", float(fields[1]), float(fields[2]) * 1024 * 1024, float(fields[3]) * 1024 * 1024, float(fields[4])))
         except ValueError:
             continue
     if not metrics:
@@ -135,6 +163,7 @@ def _read_nvidia_gpu() -> dict:
         sum(metric["percent"] for metric in metrics) / len(metrics),
         sum(metric["vram_used"] for metric in metrics),
         sum(metric["vram_total"] for metric in metrics),
+        sum(metric["temperature_c"] for metric in metrics) / len(metrics),
     )
 
 
@@ -158,6 +187,7 @@ def _read_amd_gpu() -> dict:
     metric = _parse_radeontop_utilization(result.stdout)
     if values and metric["available"]:
         metric["percent"] = round(sum(values) / len(values), 1)
+    metric["temperature_c"] = _read_amd_temperature()
     return metric
 
 
@@ -184,7 +214,7 @@ def read_system_stats() -> dict:
     total = mem.get("MemTotal", 0)
     available = mem.get("MemAvailable", mem.get("MemFree", 0))
     used = max(total - available, 0)
-    return {"memory": {"total": total, "used": used, "available": available, "used_percent": round(100 * used / total, 1) if total else 0}, "cpu_percent": _cpu_percent(), "gpu": read_gpu_stats(), "processes": _processes(), "updated_at": int(time.time())}
+    return {"memory": {"total": total, "used": used, "available": available, "used_percent": round(100 * used / total, 1) if total else 0}, "cpu_percent": _cpu_percent(), "cpu_temperature_c": _read_cpu_temperature(), "gpu": read_gpu_stats(), "processes": _processes(), "updated_at": int(time.time())}
 
 
 def discover_services() -> list[dict]:
