@@ -75,6 +75,15 @@ def _cpu_percent() -> float:
     return round(100 * (1 - (idle_b - idle_a) / total), 1) if total else 0.0
 
 
+def _unavailable_gpu(vendor: str) -> dict:
+    return {"vendor": vendor, "percent": None, "vram_used": None, "vram_total": None, "vram_percent": None, "available": False}
+
+
+def _gpu_metric(vendor: str, percent: float, vram_used: float | None = None, vram_total: float | None = None) -> dict:
+    vram_percent = round(100 * vram_used / vram_total, 1) if vram_used is not None and vram_total else None
+    return {"vendor": vendor, "percent": round(percent, 1), "vram_used": vram_used, "vram_total": vram_total, "vram_percent": vram_percent, "available": True}
+
+
 def _parse_gpu_utilization(output: str, vendor: str) -> dict:
     """Parse a `name, utilization` line into a dashboard metric."""
     for line in output.splitlines():
@@ -85,30 +94,48 @@ def _parse_gpu_utilization(output: str, vendor: str) -> dict:
             percent = float(fields[-1].rstrip("%"))
         except ValueError:
             continue
-        return {"vendor": vendor, "percent": percent, "available": True}
-    return {"vendor": vendor, "percent": None, "available": False}
+        return _gpu_metric(vendor, percent)
+    return _unavailable_gpu(vendor)
 
 
 def _parse_radeontop_utilization(output: str) -> dict:
-    match = re.search(r"\bgpu\s+([0-9]+(?:\.[0-9]+)?)%", output)
-    if not match:
-        return _parse_gpu_utilization("", "AMD")
-    return {"vendor": "AMD", "percent": float(match.group(1)), "available": True}
+    gpu_match = re.search(r"\bgpu\s+([0-9]+(?:\.[0-9]+)?)%", output)
+    vram_match = re.search(r"\bvram\s+([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+(?:\.[0-9]+)?)mb", output, re.IGNORECASE)
+    if not gpu_match:
+        return _unavailable_gpu("AMD")
+    vram_used = None
+    vram_total = None
+    if vram_match and float(vram_match.group(1)):
+        vram_used = float(vram_match.group(2)) * 1024 * 1024
+        vram_total = vram_used * 100 / float(vram_match.group(1))
+    return _gpu_metric("AMD", float(gpu_match.group(1)), vram_used, vram_total)
 
 
 def _read_nvidia_gpu() -> dict:
     try:
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,utilization.gpu", "--format=csv,noheader,nounits"],
+            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, check=True, timeout=2,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return _parse_gpu_utilization("", "NVIDIA")
-    metrics = [_parse_gpu_utilization(line, "NVIDIA") for line in result.stdout.splitlines()]
-    available = [metric["percent"] for metric in metrics if metric["available"]]
-    if not available:
-        return _parse_gpu_utilization("", "NVIDIA")
-    return {"vendor": "NVIDIA", "percent": round(sum(available) / len(available), 1), "available": True}
+        return _unavailable_gpu("NVIDIA")
+    metrics = []
+    for line in result.stdout.splitlines():
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) < 4:
+            continue
+        try:
+            metrics.append(_gpu_metric("NVIDIA", float(fields[1]), float(fields[2]) * 1024 * 1024, float(fields[3]) * 1024 * 1024))
+        except ValueError:
+            continue
+    if not metrics:
+        return _unavailable_gpu("NVIDIA")
+    return _gpu_metric(
+        "NVIDIA",
+        sum(metric["percent"] for metric in metrics) / len(metrics),
+        sum(metric["vram_used"] for metric in metrics),
+        sum(metric["vram_total"] for metric in metrics),
+    )
 
 
 def _read_amd_gpu() -> dict:
@@ -121,16 +148,17 @@ def _read_amd_gpu() -> dict:
             values.append(float(busy_path.read_text().strip()))
         except (OSError, ValueError):
             continue
-    if not values:
-        try:
-            result = subprocess.run(
-                ["radeontop", "-d", "-", "-l", "1"],
-                capture_output=True, text=True, check=True, timeout=3,
-            )
-        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return _parse_gpu_utilization("", "AMD")
-        return _parse_radeontop_utilization(result.stdout)
-    return {"vendor": "AMD", "percent": round(sum(values) / len(values), 1), "available": True}
+    try:
+        result = subprocess.run(
+            ["radeontop", "-d", "-", "-l", "1"],
+            capture_output=True, text=True, check=True, timeout=3,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return _unavailable_gpu("AMD")
+    metric = _parse_radeontop_utilization(result.stdout)
+    if values and metric["available"]:
+        metric["percent"] = round(sum(values) / len(values), 1)
+    return metric
 
 
 def read_gpu_stats() -> dict:

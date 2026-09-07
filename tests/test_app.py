@@ -46,8 +46,20 @@ class DashboardTests(unittest.TestCase):
         for vendor in ("nvidia", "amd"):
             metric = stats["gpu"][vendor]
             self.assertIn("percent", metric)
+            self.assertIn("vram_used", metric)
+            self.assertIn("vram_total", metric)
+            self.assertIn("vram_percent", metric)
             self.assertIn("available", metric)
             self.assertTrue(metric["percent"] is None or isinstance(metric["percent"], (int, float)))
+
+    def test_parse_radeontop_reads_vram_usage(self):
+        from app import _parse_radeontop_utilization
+
+        metric = _parse_radeontop_utilization("123.4: bus 23, gpu 12.50%, vram 25.00% 512.00mb")
+        self.assertEqual(metric["percent"], 12.5)
+        self.assertEqual(metric["vram_used"], 512 * 1024 * 1024)
+        self.assertEqual(metric["vram_total"], 2048 * 1024 * 1024)
+        self.assertEqual(metric["vram_percent"], 25.0)
 
     def test_parse_radeontop_utilization(self):
         from app import _parse_radeontop_utilization
