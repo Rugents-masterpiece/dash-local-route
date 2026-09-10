@@ -16,10 +16,21 @@ services:
       - /dev/nvidia-modeset:/dev/nvidia-modeset
       - /dev/nvidia-uvm:/dev/nvidia-uvm
       - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+    environment:
+      SERVICE_REGISTRY: /app/registry/services.json
+      WATCHDOG_STATE_FILE: /run/dash-local-route/watchdog-state/service-watchdog.json
+      WATCHDOG_OUTPUT_DIR: /run/dash-local-route/watchdog-output
     volumes:
+      # Registry directory preserves atomic replace visibility inside Docker.
+      - /home/rugent/workspace/dash-local-route:/app/registry:ro
+      - /home/rugent/.hermes/state:/run/dash-local-route/watchdog-state:ro
+      - /home/rugent/.hermes/cron/output/ab1da72efeea:/run/dash-local-route/watchdog-output:ro
       - /sys:/sys:ro
       - /usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro
       - /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:ro
+      # Dashboard reads the friendly login password and upstream key at login time.
+      - /home/rugent/public_repo/openviking-runtime/openviking-user.env:/run/dash-local-route/openviking-user.env:ro
+      - /home/rugent/public_repo/openviking-runtime/openviking-dashboard-backend.env:/run/dash-local-route/openviking-backend.env:ro
     healthcheck:
       test:
         - CMD

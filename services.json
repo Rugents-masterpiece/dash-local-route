@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "services": [
+    {
+      "name": "Peppol features",
+      "description": "Vizualizácia elektronických faktúr",
+      "url": "http://192.168.16.42:10001/",
+      "check_url": "http://127.0.0.1:10001/",
+      "port": 10001,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web",
+      "restart_command": "docker restart peppol-features"
+    },
+    {
+      "name": "OpenHands Agent Canvas",
+      "description": "Lokálny vývojový dashboard",
+      "url": "http://192.168.16.42:3001/",
+      "check_url": "http://127.0.0.1:3001/",
+      "port": 3001,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Orbit",
+      "description": "Lokálny orchestrátor · chránený proxy prístup",
+      "url": "/proxy/orbit/",
+      "check_url": "http://127.0.0.1:7878/",
+      "port": 7878,
+      "scheme": "http",
+      "protected": true,
+      "proxy_target": "http://127.0.0.1:7878",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Hermes Agent",
+      "description": "Lokálne AI rozhranie",
+      "url": "http://127.0.0.1:9119/",
+      "port": 9119,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Open WebUI",
+      "description": "Webové rozhranie pre AI",
+      "url": "http://127.0.0.1:3080/",
+      "port": 3080,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web",
+      "restart_command": "docker restart open-webui"
+    },
+    {
+      "name": "OpenViking Studio",
+      "description": "Lokálne znalostné úložisko · chránený proxy prístup",
+      "url": "/proxy/openviking/studio/",
+      "check_url": "http://127.0.0.1:1933/health",
+      "port": 1933,
+      "scheme": "http",
+      "protected": true,
+      "proxy_target": "http://127.0.0.1:1933",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Firecrawl API",
+      "description": "Lokálne API · nemá samostatné GUI",
+      "url": "http://192.168.16.42:3002/",
+      "port": 3002,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api",
+      "restart_command": "docker restart firecrawl-api-1"
+    },
+    {
+      "name": "Qwen Prisma",
+      "description": "LiteLLM model · vLLM na 192.168.16.243",
+      "url": "http://192.168.16.243:8001/v1/models",
+      "port": 8001,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "gemma-4-12b-it",
+      "description": "LLM model · llama.cpp na tomto PC",
+      "url": "http://127.0.0.1:8080/v1/models",
+      "port": 8080,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "Multilingual E5 Small",
+      "description": "LiteLLM embedding model · llama.cpp",
+      "url": "http://127.0.0.1:8081/v1/models",
+      "port": 8081,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "BGE Reranker v2 M3",
+      "description": "LiteLLM reranking model · llama.cpp",
+      "url": "http://127.0.0.1:8082/v1/models",
+      "port": 8082,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "Hermes Gateway API",
+      "description": "Health a stav Hermes gateway",
+      "url": "http://192.168.16.42:9119/api/health",
+      "check_url": "http://127.0.0.1:9119/api/health",
+      "port": 9119,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "LiteLLM OpenAI API",
+      "description": "OpenAI-kompatibilné API proxy",
+      "url": "http://192.168.16.42:4000/v1",
+      "check_url": "http://127.0.0.1:4000/ui/",
+      "port": 4000,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "LiteLLM",
+      "description": "Dashboard pre lokálny LLM proxy",
+      "url": "http://192.168.16.42:4000/ui/",
+      "check_url": "http://127.0.0.1:4000/ui/",
+      "port": 4000,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web",
+      "restart_command": "docker restart litellm-litellm-1"
+    },
+    {
+      "name": "SearXNG",
+      "description": "Lokálny metavyhľadávač",
+      "url": "http://192.168.16.42:8888/",
+      "check_url": "http://127.0.0.1:8888/",
+      "port": 8888,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Portainer",
+      "description": "Správa Docker kontajnerov · vyžaduje reštart",
+      "url": "https://192.168.16.42:9443/",
+      "check_url": "https://127.0.0.1:9443/",
+      "port": 9443,
+      "scheme": "https",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Prometheus",
+      "description": "Monitorovanie a časové rady",
+      "url": "http://192.168.16.42:9090",
+      "port": 9090,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Grafana · Hetzner Cloud",
+      "description": "Metriky Hetzner Cloud servera",
+      "url": "http://192.168.16.164:3000/d/ad7ghz7/my-htzner-dash?from=now-6h&to=now&timezone=browser&var-filter0=&dtab=New-tab",
+      "port": 3000,
+      "scheme": "http",
+      "managed": false,
+      "kind": "web",
+      "notes": "Vzdialený host; agent ho nesmie opravovať.",
+      "maintenance": false
+    }
+  ]
+}

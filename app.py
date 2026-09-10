@@ -6,12 +6,14 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import subprocess
 import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).parent
 ASSETS = {
@@ -21,26 +23,56 @@ ASSETS = {
 }
 HOST = os.environ.get("DASH_HOST", "0.0.0.0")
 PORT = int(os.environ.get("DASH_PORT", "8090"))
-SERVICES = [
-    {"name": "Orbit", "description": "Lokálny orchestrátor", "url": "http://127.0.0.1:7878/", "port": 7878, "scheme": "http"},
-    {"name": "Hermes Agent", "description": "Lokálne AI rozhranie", "url": "http://127.0.0.1:9119/", "port": 9119, "scheme": "http"},
-    {"name": "Open WebUI", "description": "Webové rozhranie pre AI", "url": "http://127.0.0.1:3080/", "port": 3080, "scheme": "http"},
-    {"name": "OpenViking Studio", "description": "Lokálne znalostné úložisko", "url": "http://127.0.0.1:1933/studio/", "port": 1933, "scheme": "http"},
-    {"name": "Firecrawl API", "description": "Lokálne API · nemá samostatné GUI", "url": "http://192.168.16.42:3002/", "port": 3002, "scheme": "http", "kind": "api"},
-    {"name": "Qwen Prisma", "description": "LiteLLM model · vLLM na 192.168.16.243", "url": "http://192.168.16.243:8001/v1/models", "port": 8001, "scheme": "http", "kind": "api"},
-    {"name": "Nemo Rugent", "description": "LiteLLM model · llama.cpp na tomto PC", "url": "http://127.0.0.1:8089/v1/models", "port": 8089, "scheme": "http", "kind": "api"},
-    {"name": "Multilingual E5 Small", "description": "LiteLLM embedding model · llama.cpp", "url": "http://127.0.0.1:8081/v1/models", "port": 8081, "scheme": "http", "kind": "api"},
-    {"name": "BGE Reranker v2 M3", "description": "LiteLLM reranking model · llama.cpp", "url": "http://127.0.0.1:8082/v1/models", "port": 8082, "scheme": "http", "kind": "api"},
-    {"name": "Hermes Gateway API", "description": "Health a stav Hermes gateway", "url": "http://192.168.16.42:9119/api/health", "check_url": "http://127.0.0.1:9119/api/health", "port": 9119, "scheme": "http", "kind": "api"},
-    {"name": "LiteLLM OpenAI API", "description": "OpenAI-kompatibilné API proxy", "url": "http://192.168.16.42:4000/v1", "check_url": "http://127.0.0.1:4000/ui/", "port": 4000, "scheme": "http", "kind": "api"},
-    {"name": "LiteLLM", "description": "Dashboard pre lokálny LLM proxy", "url": "http://192.168.16.42:4000/ui/", "check_url": "http://127.0.0.1:4000/ui/", "port": 4000, "scheme": "http"},
-    {"name": "SearXNG", "description": "Lokálny metavyhľadávač", "url": "http://192.168.16.42:8888/", "check_url": "http://127.0.0.1:8888/", "port": 8888, "scheme": "http"},
-    {"name": "Templator Peppol", "description": "Vizualizácia elektronických faktúr", "url": "http://192.168.16.42:10001/", "check_url": "http://127.0.0.1:10001/", "port": 10001, "scheme": "http"},
-    {"name": "Portainer", "description": "Správa Docker kontajnerov · vyžaduje reštart", "url": "https://192.168.16.42:9443/", "check_url": "https://127.0.0.1:9443/", "port": 9443, "scheme": "https"},
-    {"name": "Prometheus", "description": "Monitorovanie a časové rady", "url": "http://192.168.16.42:9090", "port": 9090, "scheme": "http"},
-    {"name": "cAdvisor", "description": "Metriky Docker kontajnerov · metrics endpoint", "url": "http://192.168.16.42:8080/metrics", "port": 8080, "scheme": "http", "kind": "api"},
-    {"name": "Grafana · Hetzner Cloud", "description": "Metriky Hetzner Cloud servera", "url": "http://192.168.16.164:3000/d/ad7ghz7/my-htzner-dash?from=now-6h&to=now&timezone=browser&var-filter0=&dtab=New-tab", "port": 3000, "scheme": "http"},
-]
+SERVICE_REGISTRY = Path(os.environ.get("SERVICE_REGISTRY", ROOT / "services.json"))
+WATCHDOG_STATE_FILE = Path(os.environ.get("WATCHDOG_STATE_FILE", "/home/rugent/.hermes/state/service-watchdog.json"))
+WATCHDOG_OUTPUT_DIR = Path(os.environ.get("WATCHDOG_OUTPUT_DIR", "/home/rugent/.hermes/cron/output/ab1da72efeea"))
+
+
+def load_services() -> list[dict]:
+    """Load the service registry on every status request; edits need no rebuild."""
+    try:
+        payload = json.loads(SERVICE_REGISTRY.read_text(encoding="utf-8"))
+        services = payload["services"]
+        if not isinstance(services, list):
+            raise ValueError("services must be a list")
+        return [dict(item) for item in services]
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Invalid service registry: {SERVICE_REGISTRY}") from error
+
+
+def service_registry() -> list[dict]:
+    return load_services()
+
+
+SERVICES = service_registry()
+
+SESSIONS: dict[str, dict[str, str]] = {}
+SESSION_COOKIE = "dash_session"
+OPENVIKING_USER_ENV = Path("/run/dash-local-route/openviking-user.env")
+OPENVIKING_BACKEND_ENV = Path("/run/dash-local-route/openviking-backend.env")
+
+
+def _env_value(path: Path, name: str) -> str:
+    """Read one secret from a mounted env file without logging its value."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith(name + "="):
+                return line.split("=", 1)[1].strip().strip('\\"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _openviking_login_token(password: str) -> str:
+    """Map the local dashboard password to a real upstream API token."""
+    expected_password = _env_value(OPENVIKING_USER_ENV, "OPENVIKING_USER_API_KEY")
+    upstream_token = _env_value(OPENVIKING_BACKEND_ENV, "OPENVIKING_API_KEY")
+    return upstream_token if expected_password and secrets.compare_digest(password, expected_password) else ""
+def proxy_services() -> dict[str, dict]:
+    return {
+        key: item for key, item in (("orbit", next((s for s in service_registry() if s["name"] == "Orbit"), None)), ("openviking", next((s for s in service_registry() if s["name"] == "OpenViking Studio"), None)))
+        if item and item.get("protected") and item.get("proxy_target")
+    }
 
 
 def format_bytes(value: int) -> str:
@@ -209,6 +241,38 @@ def _processes() -> list[dict]:
     return rows
 
 
+def watchdog_status() -> dict:
+    """Return a safe, short view of the latest watchdog run for the dashboard."""
+    state_records = {}
+    try:
+        raw_state = json.loads(WATCHDOG_STATE_FILE.read_text(encoding="utf-8"))
+        if isinstance(raw_state, dict):
+            state_records = raw_state
+    except (OSError, ValueError, TypeError):
+        pass
+    report = ""
+    last_run_at = None
+    try:
+        reports = sorted(WATCHDOG_OUTPUT_DIR.glob("*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
+        if reports:
+            text = reports[0].read_text(encoding="utf-8", errors="replace")
+            match = re.search(r"\*\*Run Time:\*\*\s*([^\n]+)", text)
+            last_run_at = match.group(1).strip() if match else None
+            report = text.split("## Response", 1)[-1].strip() if "## Response" in text else ""
+            report = report[:1200]
+    except OSError:
+        pass
+    attempts = sum(int(item.get("attempts", 0)) for item in state_records.values() if isinstance(item, dict))
+    cooldowns = [max(0, int(3600 - (time.time() - float(item.get("last_attempt_at", 0))))) for item in state_records.values() if isinstance(item, dict) and item.get("last_attempt_at")]
+    if report.startswith("PASS"):
+        status = "ONLINE"
+    elif report:
+        status = "WARNING"
+    else:
+        status = "UNKNOWN"
+    return {"status": status, "last_run_at": last_run_at, "report": report, "restart_attempts": attempts, "restart_limit": 2, "cooldown_active": any(cooldown > 0 for cooldown in cooldowns), "state_records": len(state_records)}
+
+
 def read_system_stats() -> dict:
     mem = _meminfo()
     total = mem.get("MemTotal", 0)
@@ -219,7 +283,7 @@ def read_system_stats() -> dict:
 
 def discover_services() -> list[dict]:
     services = []
-    for item in SERVICES:
+    for item in service_registry():
         entry = dict(item)
         request = urllib.request.Request(item.get("check_url", item["url"]), headers={"User-Agent": "dash-local-route/1.0"})
         started = time.perf_counter()
@@ -236,10 +300,187 @@ def discover_services() -> list[dict]:
     return services
 
 
+
+
+def _session_token(handler: BaseHTTPRequestHandler) -> str | None:
+    raw = handler.headers.get("Cookie", "")
+    for item in raw.split(";"):
+        key, _, value = item.strip().partition("=")
+        if key == SESSION_COOKIE and value in SESSIONS:
+            return SESSIONS[value].get("token")
+    return None
+
+
+def _proxy_path(path: str, service: str) -> str | None:
+    prefix = f"/proxy/{service}"
+    if not path.startswith(prefix):
+        return None
+    suffix = path[len(prefix):] or "/"
+    return suffix if suffix.startswith("/") else "/" + suffix
+
+
+def _rewrite_proxy_assets(body: bytes, service: str, content_type: str) -> bytes:
+    text = body.decode("utf-8", errors="replace")
+    prefix = f"/proxy/{service}"
+    if "javascript" in content_type or "css" in content_type:
+        text = re.sub(r"([\"'`])/(api|studio|assets)(?=[/\"'`])", rf"\1{prefix}/\2", text)
+    return text.encode("utf-8")
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
+    def _send_json(self, status: int, payload: dict, extra: dict[str, str] | None = None) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        if extra:
+            for key, value in extra.items():
+                self.send_header(key, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path != "/api/login":
+            proxied = self._proxy_authenticated()
+            if proxied:
+                _service, upstream_url = proxied
+                self._proxy_mutation(upstream_url, _session_token(self) or "")
+                return
+            if proxied is None and self.path.startswith("/proxy/"):
+                return
+            self.send_error(404)
+            return
+        try:
+            payload = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", "0")), 4096)))
+            service = payload.get("service", "")
+            token = str(payload.get("token", "")).strip()
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in "\\\"'":
+                token = token[1:-1].strip()
+            if token.lower().startswith("bearer "):
+                token = token[7:].strip()
+            target = proxy_services().get(service)
+            if not target or not token or len(token) > 512:
+                self._send_json(400, {"error": "Vyber službu a zadaj heslo."})
+                return
+            # OpenViking uses a friendly local password in the form. The real
+            # upstream API key is loaded server-side and never sent to the UI.
+            if service == "openviking":
+                token = _openviking_login_token(token)
+                if not token:
+                    self._send_json(401, {"error": "Heslo OpenVikingu nie je správne alebo chýba backendový kľúč."})
+                    return
+            validation_path = "/api/v1/system/status" if service == "openviking" else "/"
+            request = urllib.request.Request(target["proxy_target"] + validation_path, headers={"Authorization": f"Bearer {token}", "X-API-Key": token, "User-Agent": "dash-local-route/1.0"})
+            with urllib.request.urlopen(request, timeout=3) as response:
+                if response.status >= 400:
+                    raise urllib.error.HTTPError(request.full_url, response.status, "upstream", {}, None)
+            session_id = secrets.token_urlsafe(24)
+            SESSIONS[session_id] = {"service": service, "token": token}
+            self._send_json(200, {"redirect": target["url"]}, {"Set-Cookie": f"{SESSION_COOKIE}={session_id}; HttpOnly; SameSite=Strict; Path=/"})
+        except (ValueError, KeyError, urllib.error.URLError, TimeoutError, OSError):
+            self._send_json(401, {"error": "Služba token neprijala alebo nie je dostupná."})
+
+    def _proxy_get(self, upstream_url: str, token: str) -> None:
+        request = urllib.request.Request(upstream_url, headers={"Authorization": f"Bearer {token}", "X-API-Key": token, "User-Agent": "dash-local-route/1.0"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                body = response.read(8 * 1024 * 1024)
+                content_type = response.headers.get("Content-Type", "application/octet-stream")
+                service = upstream_url.split("/proxy/")[-1] if "/proxy/" in upstream_url else ""
+                # Keep HTML assets and form actions behind the authenticated prefix.
+                if "text/html" in content_type:
+                    body = _rewrite_proxy_assets(body, "openviking" if ":1933" in upstream_url else "orbit", "text/html")
+                    text = body.decode("utf-8", errors="replace")
+                    prefix = "/proxy/openviking" if ":1933" in upstream_url else "/proxy/orbit"
+                    text = re.sub(r"(href|src|action)=(\"|')/(?!/)", rf"\1=\2{prefix}/", text)
+                    body = text.encode("utf-8")
+                elif "javascript" in content_type or "css" in content_type:
+                    body = _rewrite_proxy_assets(body, "openviking" if ":1933" in upstream_url else "orbit", content_type)
+                self.send_response(response.status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                location = response.headers.get("Location")
+                if location:
+                    self.send_header("Location", location.replace("http://127.0.0.1:7878", "/proxy/orbit").replace("http://127.0.0.1:1933", "/proxy/openviking"))
+                self.end_headers()
+                self.wfile.write(body)
+        except urllib.error.HTTPError as error:
+            self._send_json(error.code, {"error": "Proxy upstream odpovedal chybou."})
+        except (urllib.error.URLError, TimeoutError, OSError):
+            self._send_json(502, {"error": "Proxy upstream nie je dostupný."})
+
+    def _proxy_mutation(self, upstream_url: str, token: str) -> None:
+        length = min(int(self.headers.get("Content-Length", "0")), 8 * 1024 * 1024)
+        data = self.rfile.read(length)
+        headers = {"Authorization": f"Bearer {token}", "X-API-Key": token, "User-Agent": "dash-local-route/1.0", "Content-Type": self.headers.get("Content-Type", "application/octet-stream")}
+        request = urllib.request.Request(upstream_url, data=data, headers=headers, method=self.command)
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                body = response.read(8 * 1024 * 1024)
+                self.send_response(response.status)
+                self.send_header("Content-Type", response.headers.get("Content-Type", "application/octet-stream"))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        except urllib.error.HTTPError as error:
+            self._send_json(error.code, {"error": "Proxy upstream odpovedal chybou."})
+        except (urllib.error.URLError, TimeoutError, OSError):
+            self._send_json(502, {"error": "Proxy upstream nie je dostupný."})
+
+    def _proxy_authenticated(self) -> tuple[str, str] | None:
+        for service, target in proxy_services().items():
+            path = _proxy_path(self.path, service)
+            if path is None:
+                continue
+            token = _session_token(self)
+            raw_cookie = self.headers.get("Cookie", "")
+            session_service = next((SESSIONS.get(item.strip().split("=", 1)[1], {}).get("service") for item in raw_cookie.split(";") if item.strip().startswith(SESSION_COOKIE + "=")), None)
+            if not token or session_service != service:
+                self._send_json(401, {"error": "Najprv sa prihláste."})
+                return None
+            return service, target["proxy_target"] + path
+        return None
+
+    def do_PUT(self):
+        self._handle_proxy_mutation()
+
+    def do_PATCH(self):
+        self._handle_proxy_mutation()
+
+    def do_DELETE(self):
+        self._handle_proxy_mutation()
+
+    def _handle_proxy_mutation(self) -> None:
+        proxied = self._proxy_authenticated()
+        if proxied:
+            _service, upstream_url = proxied
+            self._proxy_mutation(upstream_url, _session_token(self) or "")
+        elif proxied is None and self.path.startswith("/proxy/"):
+            return
+        else:
+            self.send_error(404)
+
     def do_GET(self):
+        for service, target in proxy_services().items():
+            upstream_path = _proxy_path(self.path, service)
+            if upstream_path is not None:
+                token = _session_token(self)
+                session_service = None
+                cookie = self.headers.get("Cookie", "")
+                for item in cookie.split(";"):
+                    key, _, value = item.strip().partition("=")
+                    if key == SESSION_COOKIE:
+                        session_service = SESSIONS.get(value, {}).get("service")
+                if not token or session_service != service:
+                    self._send_json(401, {"error": "Najprv sa prihláste."})
+                    return
+                self._proxy_get(target["proxy_target"] + upstream_path, token)
+                return
         if self.path == "/api/status":
-            payload = {"services": discover_services(), "system": read_system_stats()}
+            payload = {"services": discover_services(), "system": read_system_stats(), "watchdog": watchdog_status()}
             body = json.dumps(payload, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
