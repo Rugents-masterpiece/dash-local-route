@@ -14,13 +14,14 @@
     },
     {
       "name": "OpenHands Agent Canvas",
-      "description": "Lokálny vývojový dashboard",
-      "url": "http://192.168.16.42:3001/",
-      "check_url": "http://127.0.0.1:3001/",
-      "port": 3001,
+      "description": "Lokálny vývojový dashboard · dostupný iba na whitelistu",
+      "url": "http://192.168.16.42:8000/",
+      "check_url": "http://127.0.0.1:8000/",
+      "port": 8000,
       "scheme": "http",
       "managed": true,
-      "kind": "web"
+      "kind": "web",
+      "notes": "Prístup je povolený iba klientom na whitelistu."
     },
     {
       "name": "Orbit",
@@ -50,6 +51,7 @@
       "port": 3080,
       "scheme": "http",
       "managed": true,
+      "paused": true,
       "kind": "web",
       "restart_command": "docker restart open-webui"
     },
@@ -79,34 +81,18 @@
       "name": "Qwen Prisma",
       "description": "LiteLLM model · vLLM na 192.168.16.243",
       "url": "http://192.168.16.243:8001/v1/models",
+      "check_url": "http://192.168.16.243:8001/health",
       "port": 8001,
       "scheme": "http",
       "managed": true,
       "kind": "api"
     },
     {
-      "name": "gemma-4-12b-it",
-      "description": "LLM model · llama.cpp na tomto PC",
-      "url": "http://127.0.0.1:8080/v1/models",
-      "port": 8080,
-      "scheme": "http",
-      "managed": true,
-      "kind": "api"
-    },
-    {
-      "name": "Multilingual E5 Small",
-      "description": "LiteLLM embedding model · llama.cpp",
-      "url": "http://127.0.0.1:8081/v1/models",
-      "port": 8081,
-      "scheme": "http",
-      "managed": true,
-      "kind": "api"
-    },
-    {
-      "name": "BGE Reranker v2 M3",
-      "description": "LiteLLM reranking model · llama.cpp",
-      "url": "http://127.0.0.1:8082/v1/models",
-      "port": 8082,
+      "name": "Gemma 4 26B-A4B QAT",
+      "description": "Lokálny Gemma 4 26B-A4B IT QAT · llama.cpp na RTX 4060 Ti",
+      "url": "http://192.168.16.42:8001/v1/models",
+      "check_url": "http://127.0.0.1:8001/health",
+      "port": 8001,
       "scheme": "http",
       "managed": true,
       "kind": "api"
@@ -181,6 +167,212 @@
       "kind": "web",
       "notes": "Vzdialený host; agent ho nesmie opravovať.",
       "maintenance": false
+    },
+    {
+      "name": "SeaweedFS Master",
+      "description": "SeaweedFS master HTTP UI/API",
+      "url": "http://192.168.16.42:9333/",
+      "check_url": "http://127.0.0.1:9333/",
+      "port": 9333,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "SeaweedFS Volume server",
+      "description": "SeaweedFS volume server API bez samostatného GUI",
+      "url": "http://192.168.16.42:9310/",
+      "check_url": "http://127.0.0.1:9310/status",
+      "port": 9310,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "SeaweedFS S3 systémová inštancia",
+      "description": "Samostatná systémová SeaweedFS S3 API inštancia",
+      "url": "http://192.168.16.42:13000/",
+      "check_url": "http://127.0.0.1:13000/status",
+      "port": 13000,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api",
+      "notes": "Odlišná inštancia od user master/volume na portoch 9333 a 9310."
+    },
+    {
+      "name": "MinIO S3 API",
+      "description": "S3 API pre úložisko dokumentov",
+      "url": "http://192.168.16.42:9102/",
+      "check_url": "http://127.0.0.1:9102/minio/health/live",
+      "port": 9102,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api"
+    },
+    {
+      "name": "MinIO web konzola",
+      "description": "Webová konzola MinIO",
+      "url": "http://192.168.16.42:9103/",
+      "check_url": "http://127.0.0.1:9103/",
+      "port": 9103,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "CLM Draft-legal Dash",
+      "description": "Webové rozhranie draftLegal CLM",
+      "url": "http://192.168.16.42:5173/",
+      "check_url": "http://127.0.0.1:5173/",
+      "port": 5173,
+      "scheme": "http",
+      "managed": true,
+      "paused": true,
+      "kind": "web",
+      "source": "/home/rugent/draft-legal"
+    },
+    {
+      "name": "CLM Draft-legal API",
+      "description": "REST API pre CLM Draft-legal",
+      "url": "http://192.168.16.42:3004/health",
+      "check_url": "http://127.0.0.1:3004/health",
+      "port": 3004,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api",
+      "source": "/home/rugent/draft-legal"
+    },
+    {
+      "name": "CLM Agents API",
+      "description": "Agents služba pre AI pracovné postupy CLM",
+      "url": "http://192.168.16.42:8002/health",
+      "check_url": "http://127.0.0.1:8002/health",
+      "port": 8002,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api",
+      "source": "/home/rugent/draft-legal"
+    },
+    {
+      "name": "CLM Elasticsearch API",
+      "description": "Elasticsearch vyhľadávací backend pre CLM",
+      "url": "http://192.168.16.42:9200/",
+      "check_url": "http://127.0.0.1:9200/",
+      "port": 9200,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api",
+      "source": "/home/rugent/draft-legal"
+    },
+    {
+      "name": "CLM Gotenberg API",
+      "description": "Konverzia dokumentov a PDF pre CLM",
+      "url": "http://192.168.16.42:3003/health",
+      "check_url": "http://127.0.0.1:3003/health",
+      "port": 3003,
+      "scheme": "http",
+      "managed": true,
+      "kind": "api",
+      "source": "/home/rugent/draft-legal"
+    },
+    {
+      "name": "ESL-manager",
+      "description": "",
+      "url": "http://192.168.16.42:10050/",
+      "check_url": "http://192.168.16.42:10050/",
+      "port": 10050,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web"
+    },
+    {
+      "name": "Rudo kričí",
+      "description": "Lokálne GUI pre TTS / STT cez RTX 3050 AI manager (rudo-tts-stt-web)",
+      "url": "http://192.168.16.42:10075/",
+      "check_url": "http://127.0.0.1:10075/health",
+      "port": 10075,
+      "scheme": "http",
+      "managed": true,
+      "kind": "web",
+      "source": "/home/rugent/rudo-tts-stt-web",
+      "restart_command": "systemctl restart rudo-tts-stt-web.service"
+    }
+  ],
+  "groups": [
+    {
+      "kind": "gpu3050",
+      "label": "RTX 3050 · AI-manager API služby",
+      "note": "modely zdieľajú RTX 3050, riadené AI GPU managerom (18080)"
+    },
+    {
+      "kind": "webové",
+      "label": "Webové služby"
+    },
+    {
+      "kind": "api",
+      "label": "API služby"
+    }
+  ],
+  "gpu3050_services": [
+    {
+      "name": "E5 Embeddings",
+      "description": "Qwen3-Embedding 0.6B — vektorové modely na RTX 3050 (cez AI manager)",
+      "url": "http://127.0.0.1:18080/v1/models",
+      "check_url": "http://127.0.0.1:18080/v1/models",
+      "port": 18080,
+      "scheme": "http",
+      "managed": true,
+      "kind": "gpu3050",
+      "ai_manager": true,
+      "source": "/home/rugent/rtx3050-profile-prototype/production-candidate"
+    },
+    {
+      "name": "BGE Reranker",
+      "description": "Qwen3-Reranker 0.6B — reranker na RTX 3050 (cez AI manager)",
+      "url": "http://127.0.0.1:18080/v1/models",
+      "check_url": "http://127.0.0.1:18080/v1/models",
+      "port": 18080,
+      "scheme": "http",
+      "managed": true,
+      "kind": "gpu3050",
+      "ai_manager": true,
+      "source": "/home/rugent/rtx3050-profile-prototype/production-candidate"
+    },
+    {
+      "name": "WhisperX STT",
+      "description": "KInIT Whisper large-v3-turbo-sk + WhisperX + pyannote — speech-to-text na RTX 3050 (cez AI manager)",
+      "url": "http://127.0.0.1:18080/health",
+      "check_url": "http://127.0.0.1:18080/health",
+      "port": 18080,
+      "scheme": "http",
+      "managed": true,
+      "kind": "gpu3050",
+      "ai_manager": true,
+      "source": "/home/rugent/rtx3050-profile-prototype/production-candidate"
+    },
+    {
+      "name": "Chatterbox TTS",
+      "description": "Chatterbox Slovak — text-to-speech na RTX 3050 (cez AI manager)",
+      "url": "http://127.0.0.1:18080/health",
+      "check_url": "http://127.0.0.1:18080/health",
+      "port": 18080,
+      "scheme": "http",
+      "managed": true,
+      "kind": "gpu3050",
+      "ai_manager": true,
+      "source": "/home/rugent/rtx3050-profile-prototype/production-candidate"
+    },
+    {
+      "name": "AI GPU Manager",
+      "description": "Arbitáž GPU profilov — drží RTX 3050, offload/load modelov po neaktivite",
+      "url": "http://127.0.0.1:18080/health",
+      "check_url": "http://127.0.0.1:18080/health",
+      "port": 18080,
+      "scheme": "http",
+      "managed": true,
+      "kind": "gpu3050",
+      "ai_manager": true,
+      "source": "/home/rugent/rtx3050-profile-prototype/production-candidate"
     }
   ]
 }

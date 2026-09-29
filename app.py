@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -26,6 +27,7 @@ PORT = int(os.environ.get("DASH_PORT", "8090"))
 SERVICE_REGISTRY = Path(os.environ.get("SERVICE_REGISTRY", ROOT / "services.json"))
 WATCHDOG_STATE_FILE = Path(os.environ.get("WATCHDOG_STATE_FILE", "/home/rugent/.hermes/state/service-watchdog.json"))
 WATCHDOG_OUTPUT_DIR = Path(os.environ.get("WATCHDOG_OUTPUT_DIR", "/home/rugent/.hermes/cron/output/ab1da72efeea"))
+LAURINCOV_REPORT_FILE = Path(os.environ.get("LAURINCOV_REPORT_FILE", "/home/rugent/workspace/laurincov-pes/watchdog-report.json"))
 
 
 def load_services() -> list[dict]:
@@ -130,20 +132,6 @@ def _read_cpu_temperature() -> float | None:
     return None
 
 
-def _read_amd_temperature() -> float | None:
-    for hwmon in sorted(Path("/sys/class/hwmon").glob("hwmon*")):
-        try:
-            if (hwmon / "name").read_text().strip() != "amdgpu":
-                continue
-            for input_path in sorted(hwmon.glob("temp*_input")):
-                label_path = input_path.with_name(input_path.name.replace("_input", "_label"))
-                if label_path.exists() and label_path.read_text().strip() == "edge":
-                    return round(float(input_path.read_text().strip()) / 1000, 1)
-        except (OSError, ValueError):
-            continue
-    return None
-
-
 def _parse_gpu_utilization(output: str, vendor: str) -> dict:
     """Parse a `name, utilization` line into a dashboard metric."""
     for line in output.splitlines():
@@ -158,74 +146,31 @@ def _parse_gpu_utilization(output: str, vendor: str) -> dict:
     return _unavailable_gpu(vendor)
 
 
-def _parse_radeontop_utilization(output: str) -> dict:
-    gpu_match = re.search(r"\bgpu\s+([0-9]+(?:\.[0-9]+)?)%", output)
-    vram_match = re.search(r"\bvram\s+([0-9]+(?:\.[0-9]+)?)%\s+([0-9]+(?:\.[0-9]+)?)mb", output, re.IGNORECASE)
-    if not gpu_match:
-        return _unavailable_gpu("AMD")
-    vram_used = None
-    vram_total = None
-    if vram_match and float(vram_match.group(1)):
-        vram_used = float(vram_match.group(2)) * 1024 * 1024
-        vram_total = vram_used * 100 / float(vram_match.group(1))
-    return _gpu_metric("AMD", float(gpu_match.group(1)), vram_used, vram_total)
-
-
-def _read_nvidia_gpu() -> dict:
+def _read_nvidia_gpus() -> list[dict]:
     try:
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"],
+            ["nvidia-smi", "--query-gpu=index,name,pci.bus_id,utilization.gpu,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"],
             capture_output=True, text=True, check=True, timeout=2,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return _unavailable_gpu("NVIDIA")
+        return [_unavailable_gpu("NVIDIA")]
     metrics = []
     for line in result.stdout.splitlines():
         fields = [field.strip() for field in line.split(",")]
-        if len(fields) < 5:
+        if len(fields) < 7:
             continue
         try:
-            metrics.append(_gpu_metric("NVIDIA", float(fields[1]), float(fields[2]) * 1024 * 1024, float(fields[3]) * 1024 * 1024, float(fields[4])))
+            metric = _gpu_metric("NVIDIA", float(fields[3]), float(fields[4]) * 1024 * 1024, float(fields[5]) * 1024 * 1024, float(fields[6]))
+            metric.update({"index": int(fields[0]), "name": fields[1], "pci_bus_id": fields[2]})
+            metrics.append(metric)
         except ValueError:
             continue
-    if not metrics:
-        return _unavailable_gpu("NVIDIA")
-    return _gpu_metric(
-        "NVIDIA",
-        sum(metric["percent"] for metric in metrics) / len(metrics),
-        sum(metric["vram_used"] for metric in metrics),
-        sum(metric["vram_total"] for metric in metrics),
-        sum(metric["temperature_c"] for metric in metrics) / len(metrics),
-    )
-
-
-def _read_amd_gpu() -> dict:
-    values = []
-    for vendor_path in sorted(Path("/sys/class/drm").glob("card[0-9]*/device/vendor")):
-        try:
-            if vendor_path.read_text().strip().lower() != "0x1002":
-                continue
-            busy_path = vendor_path.parent / "gpu_busy_percent"
-            values.append(float(busy_path.read_text().strip()))
-        except (OSError, ValueError):
-            continue
-    try:
-        result = subprocess.run(
-            ["radeontop", "-d", "-", "-l", "1"],
-            capture_output=True, text=True, check=True, timeout=3,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return _unavailable_gpu("AMD")
-    metric = _parse_radeontop_utilization(result.stdout)
-    if values and metric["available"]:
-        metric["percent"] = round(sum(values) / len(values), 1)
-    metric["temperature_c"] = _read_amd_temperature()
-    return metric
+    return metrics or [_unavailable_gpu("NVIDIA")]
 
 
 def read_gpu_stats() -> dict:
-    """Return independent NVIDIA and AMD utilization metrics."""
-    return {"nvidia": _read_nvidia_gpu(), "amd": _read_amd_gpu()}
+    """Return metrics for each installed NVIDIA GPU."""
+    return {"nvidia": _read_nvidia_gpus()}
 
 
 def _processes() -> list[dict]:
@@ -241,8 +186,150 @@ def _processes() -> list[dict]:
     return rows
 
 
+
+    def _worker(name: str) -> dict:
+        info = manager.get("workers") if isinstance(manager, dict) else None
+        return (info.get(name) if isinstance(info, dict) else None) or {}
+
+    def _state_from(worker_state: str) -> str:
+        return "loaded_in_vram" if worker_state == "gpu_ready" else "offloaded_on_ram" if worker_state in ("cpu_ready", "ram") else "OFFLINE"
+
+    # state map for the 5 RTX-3050 services: name -> derived state + detail
+    for entry in services:
+        if entry.get("kind") != "gpu3050":
+            continue
+        name = entry["name"]
+        if name == "AI GPU Manager":
+            entry["state"] = "Online" if (manager and manager.get("status") == "healthy" and not manager.get("_error")) else "Offline"
+            if manager and manager.get("state") == "busy":
+                entry["state"] = "Busy"
+            entry["manager"] = {k: manager.get(k) for k in ("active_profile", "state", "queue_depth", "accepting")} if manager else None
+            entry["detail"] = (f"profil={manager.get('active_profile')}" if manager else "unknown")
+        elif name == "E5 Embeddings":
+            st = _state_from(_worker("retrieval").get("state", ""))
+            entry["state"] = st
+            entry["online"] = st != "OFFLINE"
+        elif name == "BGE Reranker":
+            st = _state_from(_worker("retrieval").get("state", ""))
+            entry["state"] = st
+            entry["online"] = st != "OFFLINE"
+        elif name == "WhisperX STT":
+            st = _state_from(_worker("stt").get("state", ""))
+            entry["state"] = st
+            entry["online"] = st != "OFFLINE"
+        elif name == "Chatterbox TTS":
+            st = _state_from(_worker("tts").get("state", ""))
+            entry["state"] = st
+            entry["online"] = st != "OFFLINE"
+    return services
+
+
+def discover_gpu3050() -> list[dict]:
+    """Return RTX-3050 services with manager-derived states (loaded in VRAM / offloaded / offline / manager state)."""
+    services = []
+    try:
+        payload = json.loads(SERVICE_REGISTRY.read_text(encoding="utf-8"))
+        services = payload.get("gpu3050_services", [])
+    except Exception:
+        return []
+    manager = None
+    try:
+        req = urllib.request.Request("http://127.0.0.1:18080/health", headers={"User-Agent": "dash-local-route/1.0"})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            manager = json.loads(response.read().decode())
+    except Exception:
+        manager = None
+
+    def _stt_detail() -> str:
+        """Live STT stack identity (read-only), independent of the registry label."""
+        # Which STT stack the manager actually runs, asked of the manager itself
+        # (works from the container too — no host paths).
+        try:
+            req = urllib.request.Request("http://127.0.0.1:18080/status",
+                                         headers={"User-Agent": "dash-local-route/1.0"})
+            with urllib.request.urlopen(req, timeout=3) as response:
+                status = json.loads(response.read().decode())
+            events = status.get("events") or []
+            scripts = [str(e.get("script") or "") for e in reversed(events)]
+            if any("whisperx_worker" in s for s in scripts):
+                return "KInIT Whisper large-v3-turbo-sk + WhisperX + pyannote — worker bezí"
+            if any(s.endswith("stt_worker.py") for s in scripts):
+                return "POZOR: manager spúšťa Parakeet worker (stt_worker.py)"
+        except Exception:
+            pass
+        return ""
+
+    def worker_state(name: str) -> str:
+        info = (manager.get("workers") or {}).get(name) if isinstance(manager, dict) else None
+        if not isinstance(info, dict):
+            return "OFFLINE"
+        st = str(info.get("state") or "")
+        if st == "gpu_ready":
+            return "LOADED IN VRAM"
+        if st in ("cpu_ready", "ram"):
+            return "OFFLOADED ON RAM"
+        return "OFFLINE"
+
+    def manager_state() -> tuple[str, str]:
+        if not isinstance(manager, dict):
+            return "OFFLINE", "AI manager is not answering"
+        st = str(manager.get("state") or "")
+        if st == "busy" or (st == "active" and manager.get("queue_depth", 0) >= 1):
+            return "BUSY", f"active profile: {manager.get('active_profile')}"
+        if manager.get("status") == "healthy" and st in ("idle", "active", "recovering"):
+            return "ONLINE", f"active profile: {manager.get('active_profile')}"
+        return "OFFLINE", "AI manager is not healthy"
+
+    mgr_state, mgr_note = manager_state()
+    # the section header is rendered from the first item; attach a synthetic manager entry
+    gpu_services = []
+    for item in services:
+        e = dict(item)
+        e["manager_state"] = mgr_state
+        e["manager_note"] = mgr_note
+        if e["name"] == "AI GPU Manager":
+            e["state"] = mgr_state
+        elif e["name"] == "E5 Embeddings":
+            e["state"] = worker_state("retrieval")
+        elif e["name"] == "BGE Reranker":
+            e["state"] = worker_state("retrieval")
+        elif e["name"] == "WhisperX STT":
+            e["state"] = worker_state("stt")
+            detail = _stt_detail()
+            if detail:
+                e["detail"] = detail
+        elif e["name"] == "Chatterbox TTS":
+            e["state"] = worker_state("tts")
+        else:
+            e["state"] = "OFFLINE"
+        e["online"] = e["state"] in ("LOADED IN VRAM", "OFFLOADED ON RAM", "ONLINE", "BUSY")
+        gpu_services.append(e)
+    # put manager entry first
+    gpu_services.sort(key=lambda s: 0 if s["name"] == "AI GPU Manager" else 1)
+    return gpu_services
+
 def watchdog_status() -> dict:
-    """Return a safe, short view of the latest watchdog run for the dashboard."""
+    """Return the latest bounded Laurincov-pes report for the dashboard."""
+    try:
+        report = json.loads(LAURINCOV_REPORT_FILE.read_text(encoding="utf-8"))
+        if isinstance(report, dict):
+            results = report.get("results", [])
+            offline = [item for item in results if item.get("status") == "OFFLINE"]
+            agent_output = str(report.get("agent_output", ""))[-6000:]
+            return {
+                "status": "WARNING" if offline else "ONLINE",
+                "last_run_at": report.get("checked_at"),
+                "report": agent_output or f"Laurincov-pes: {report.get('online', 0)} ONLINE, {report.get('offline', 0)} OFFLINE.",
+                "restart_attempts": 0,
+                "restart_limit": 0,
+                "cooldown_active": False,
+                "state_records": len(offline),
+                "online": report.get("online", 0),
+                "offline": report.get("offline", 0),
+                "new_failures": report.get("new_failures", []),
+            }
+    except (OSError, ValueError, TypeError):
+        pass
     state_records = {}
     try:
         raw_state = json.loads(WATCHDOG_STATE_FILE.read_text(encoding="utf-8"))
@@ -278,13 +365,20 @@ def read_system_stats() -> dict:
     total = mem.get("MemTotal", 0)
     available = mem.get("MemAvailable", mem.get("MemFree", 0))
     used = max(total - available, 0)
-    return {"memory": {"total": total, "used": used, "available": available, "used_percent": round(100 * used / total, 1) if total else 0}, "cpu_percent": _cpu_percent(), "cpu_temperature_c": _read_cpu_temperature(), "gpu": read_gpu_stats(), "processes": _processes(), "updated_at": int(time.time())}
+    swap_total = mem.get("SwapTotal", 0)
+    swap_free = mem.get("SwapFree", 0)
+    swap_used = max(swap_total - swap_free, 0)
+    return {"memory": {"total": total, "used": used, "available": available, "used_percent": round(100 * used / total, 1) if total else 0, "swap_total": swap_total, "swap_used": swap_used, "swap_used_percent": round(100 * swap_used / swap_total, 1) if swap_total else 0}, "cpu_percent": _cpu_percent(), "cpu_temperature_c": _read_cpu_temperature(), "gpu": read_gpu_stats(), "processes": _processes(), "updated_at": int(time.time())}
 
 
 def discover_services() -> list[dict]:
     services = []
     for item in service_registry():
         entry = dict(item)
+        if item.get("paused"):
+            entry.update({"online": False, "status": "PAUSED", "latency_ms": None})
+            services.append(entry)
+            continue
         request = urllib.request.Request(item.get("check_url", item["url"]), headers={"User-Agent": "dash-local-route/1.0"})
         started = time.perf_counter()
         try:
@@ -480,7 +574,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._proxy_get(target["proxy_target"] + upstream_path, token)
                 return
         if self.path == "/api/status":
-            payload = {"services": discover_services(), "system": read_system_stats(), "watchdog": watchdog_status()}
+            payload = {"services": discover_services(), "gpu3050": discover_gpu3050(), "system": read_system_stats(), "watchdog": watchdog_status()}
             body = json.dumps(payload, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")

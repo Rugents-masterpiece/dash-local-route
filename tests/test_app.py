@@ -15,15 +15,17 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("SearXNG", names)
         self.assertIn("Peppol features", names)
         self.assertIn("Qwen Prisma", names)
-        self.assertIn("gemma-4-12b-it", names)
+        self.assertIn("Gemma 4 26B-A4B QAT", names)
+        self.assertIn("Qwen3 Embedding 0.6B", names)
+        self.assertIn("Qwen3 Reranker 0.6B", names)
         self.assertIn("Hermes Gateway API", names)
         self.assertIn("Prometheus", names)
         self.assertIn("OpenHands Agent Canvas", names)
-        self.assertEqual(next(s for s in services if s["name"] == "OpenHands Agent Canvas")["url"], "http://192.168.16.42:3001/")
+        self.assertEqual(next(s for s in services if s["name"] == "OpenHands Agent Canvas")["url"], "http://192.168.16.42:8000/")
 
         self.assertIn("Grafana · Hetzner Cloud", names)
         self.assertEqual(services[0]["name"], "Peppol features")
-        self.assertEqual(next(s for s in services if s["name"] == "gemma-4-12b-it")["url"], "http://127.0.0.1:8080/v1/models")
+        self.assertEqual(next(s for s in services if s["name"] == "Gemma 4 26B-A4B QAT")["url"], "http://192.168.16.42:8001/v1/models")
         self.assertEqual(next(s for s in services if s["name"] == "LiteLLM")["url"], "http://192.168.16.42:4000/ui/")
         self.assertEqual(next(s for s in services if s["name"] == "Prometheus")["url"], "http://192.168.16.42:9090")
 
@@ -42,13 +44,15 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("cpu_percent", stats)
         self.assertIn("processes", stats)
 
-    def test_system_stats_have_separate_nvidia_and_amd_gpu_metrics(self):
+    def test_system_stats_have_both_nvidia_gpu_metrics(self):
         stats = read_system_stats()
-        self.assertIn("gpu", stats)
-        self.assertIn("nvidia", stats["gpu"])
-        self.assertIn("amd", stats["gpu"])
-        for vendor in ("nvidia", "amd"):
-            metric = stats["gpu"][vendor]
+        gpus = stats["gpu"]["nvidia"]
+        self.assertGreaterEqual(len(gpus), 2)
+        self.assertEqual(gpus[0]["vendor"], "NVIDIA")
+        self.assertEqual(gpus[1]["vendor"], "NVIDIA")
+        self.assertIn("name", gpus[0])
+        self.assertIn("pci_bus_id", gpus[1])
+        for metric in gpus:
             self.assertIn("percent", metric)
             self.assertIn("vram_used", metric)
             self.assertIn("vram_total", metric)
@@ -56,35 +60,6 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("available", metric)
             self.assertTrue(metric["percent"] is None or isinstance(metric["percent"], (int, float)))
 
-    def test_parse_radeontop_reads_vram_usage(self):
-        from app import _parse_radeontop_utilization
-
-        metric = _parse_radeontop_utilization("123.4: bus 23, gpu 12.50%, vram 25.00% 512.00mb")
-        self.assertEqual(metric["percent"], 12.5)
-        self.assertEqual(metric["vram_used"], 512 * 1024 * 1024)
-        self.assertEqual(metric["vram_total"], 2048 * 1024 * 1024)
-        self.assertEqual(metric["vram_percent"], 25.0)
-
-    def test_parse_radeontop_utilization(self):
-        from app import _parse_radeontop_utilization
-
-        metric = _parse_radeontop_utilization("123.4: bus 23, gpu 12.50%, ee 0.00%")
-        self.assertEqual(metric["vendor"], "AMD")
-        self.assertEqual(metric["percent"], 12.5)
-        self.assertTrue(metric["available"])
-
-    def test_parse_gpu_utilization_keeps_vendor_values_separate(self):
-        from app import _parse_gpu_utilization
-
-        parsed = _parse_gpu_utilization("NVIDIA GeForce RTX 4060 Ti, 37\n", "NVIDIA")
-        self.assertEqual(parsed["vendor"], "NVIDIA")
-        self.assertEqual(parsed["percent"], 37.0)
-        self.assertTrue(parsed["available"])
-
-        unavailable = _parse_gpu_utilization("", "AMD")
-        self.assertEqual(unavailable["vendor"], "AMD")
-        self.assertIsNone(unavailable["percent"])
-        self.assertFalse(unavailable["available"])
 
 
 if __name__ == "__main__":
