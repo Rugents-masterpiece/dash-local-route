@@ -21,7 +21,8 @@
       "scheme": "http",
       "managed": true,
       "kind": "web",
-      "notes": "Prístup je povolený iba klientom na whitelistu."
+      "notes": "Prístup je povolený iba klientom na whitelistu.",
+      "paused": true
     },
     {
       "name": "Orbit",
@@ -283,7 +284,8 @@
       "port": 10050,
       "scheme": "http",
       "managed": true,
-      "kind": "web"
+      "kind": "web",
+      "paused": false
     },
     {
       "name": "Rudo kričí",
@@ -296,6 +298,18 @@
       "kind": "web",
       "source": "/home/rugent/rudo-tts-stt-web",
       "restart_command": "systemctl restart rudo-tts-stt-web.service"
+    },
+    {
+      "name": "SAPI-SK proxy",
+      "description": "Revolučná API proxy · verejný web sapi.patjo.uk · 124 endpointov v 4 Swagger kategóriách",
+      "url": "https://sapi.patjo.uk/",
+      "check_url": "https://sapi.patjo.uk/health",
+      "port": 443,
+      "scheme": "https",
+      "managed": true,
+      "kind": "web",
+      "paused": false,
+      "notes": "Za cloudflared quick tunnel; restart a nová UPSTREAM URL manuálne v public_repo/sapi-sk-proxy/deploy."
     }
   ],
   "groups": [
