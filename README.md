@@ -1,40 +1,100 @@
 # dash-local-route
 
-Ľahký dashboard lokálnych webových služieb. Používa iba Python štandardnú knižnicu, bez externých balíkov.
+Local dashboard for monitoring host resources (CPU, RAM, GPU VRAM, temperatures), Docker services, and the Laurincov-pes deterministic watchdog. Written in Python with a dependency-free HTTP server and a vanilla JS frontend.
 
-## Spustenie
+## Features
+
+- **System metrics**: CPU usage, temperature, NVIDIA GPU utilization + VRAM, DDR4 RAM, swap
+- **Service health**: Checks web services and API endpoints via HTTP/HTTPS/MySQL
+- **Watchdog UI**: Displays Laurincov-pes watchdog report (ONLINE/OFFLINE/PAUSED endpoints)
+- **Service control**: Start/stop managed services via loopback controller (dash-control.service)
+- **Auto-refresh**: Updates every 10 seconds
+- **No external dependencies**: Pure Python stdlib + vanilla JS/CSS
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  dash-local-route (Python HTTP server on :8090)            │
+│  ├── /api/status  → JSON with system + service + watchdog  │
+│  ├── /index.html  → Frontend (served statically)           │
+│  └── /assets/*    → SVG logos                              │
+└─────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+   ┌──────────┐       ┌──────────────┐     ┌──────────────┐
+   │  System  │       │  Services    │     │  Watchdog    │
+   │  (ps,    │       │  (HTTP/      │     │  (JSON file  │
+   │  nvidia- │       │   MySQL)     │     │   from       │
+   │  smi,    │       │              │     │   laurincov- │
+   │  /proc)  │       │              │     │   pes)       │
+   └──────────┘       └──────────────┘     └──────────────┘
+```
+
+## Prerequisites
+
+- Python 3.10+
+- `nvidia-smi` (for GPU metrics)
+- `docker` (for container stats via `docker stats`)
+- `systemd` (for service control via `dash-control.service` on :18002)
+
+## Installation
 
 ```bash
+# Clone
+git clone https://github.com/Rugents-masterpiece/dash-local-route.git
+cd dash-local-route
+
+# Run directly (no venv needed)
 python3 app.py
+
+# Or with Docker
+docker compose up -d --build
 ```
 
-Predvolene počúva na `0.0.0.0:8090`. Port a bind adresu možno zmeniť cez `DASH_PORT` a `DASH_HOST`.
+Access at `http://<host>:10001` (via gateway) or `http://<host>:8090` (direct).
 
-Dashboard zobrazuje odkazy, HTTP health check, odozvu, CPU hostiteľa, samostatné údaje oboch NVIDIA GPU (index, názov, PCI bus, využitie, VRAM a teplota), RAM a procesy s najvyšším využitím. AMD GPU už dashboard nesleduje. Ak ovládač alebo GPU metriku nemožno prečítať, príslušná karta zobrazí `N/A`.
+## Configuration
 
-## Externý register služieb
+Environment variables:
+- `DASH_HOST` (default: `0.0.0.0`)
+- `DASH_PORT` (default: `8090`)
+- `SERVICE_REGISTRY` (default: `./services.json`)
+- `WATCHDOG_STATE_FILE` (default: `/home/rugent/.hermes/state/service-watchdog.json`)
+- `WATCHDOG_OUTPUT_DIR` (default: `/home/rugent/.hermes/cron/output/...`)
+- `LAURINCOV_REPORT_FILE` (default: `/home/rugent/workspace/laurincov-pes/watchdog-report.json`)
+- `SERVICE_CONTROL_URL` (default: `http://127.0.0.1:18002`)
+- `SERVICE_CONTROL_TOKEN_FILE` (default: `/run/dash-local-route/control.env`)
 
-Zoznam je v `services.json`, nie v HTML/JavaScripte. Dashboard ho načíta pri každom `/api/status`, takže zmena sa prejaví bez rebuild-u kontajnera. Upravuj ho cez atomický nástroj:
+## Service Registry
 
-```bash
-python3 manage_services.py list
-python3 manage_services.py add "Moja služba" http://127.0.0.1:1234/ --description "..." --source /cesta/projektu --restart-command "..."
-python3 manage_services.py remove "Moja služba"
-python3 manage_services.py maintenance "Moja služba" on
-python3 manage_services.py maintenance "Moja služba" off
+Edit `services.json` to define monitored services:
+
+```json
+{
+  "services": [
+    {
+      "name": "OpenViking",
+      "url": "http://127.0.0.1:1933/health",
+      "check_url": "http://127.0.0.1:1933/health",
+      "scheme": "http",
+      "port": 1933,
+      "managed": true,
+      "kind": "web",
+      "description": "OpenViking Studio"
+    }
+  ]
+}
 ```
 
-`managed: false` alebo `maintenance: true` znamená, že automatická úloha službu iba skontroluje a nespustí opravu/reštart. Pri ručnej práci teda zapni údržbu; odstránenie z registra je voliteľné. `restart_command` je jediný príkaz, ktorý smie automatická úloha použiť na reštart konkrétnej služby; bez neho iba diagnostikuje a nahlási príčinu.
+Fields: `name`, `url`, `check_url`, `scheme` (http/https/mysql), `port`, `managed`, `kind` (web/api), `description`, `paused`, `protected`, `proxy_target`.
 
-Dashboard zobrazuje aj stav Hermes watchdogu, čas posledného behu, počet povolených reštartov a posledný krátky report. Stav je čítaný z cron výstupu a z `/home/rugent/.hermes/state/service-watchdog.json`; prompt a citlivé údaje sa do dashboardu neposielajú.
+## Security
 
-## Chránené služby
+- Service control requires token from `/run/dash-local-route/control.env`
+- Protected services (Orbit, OpenViking) require password login
+- Runs on loopback only by default
 
-Orbit a OpenViking Studio sa otvárajú cez lokálnu autentifikovanú proxy:
+## License
 
-- `/proxy/orbit/`
-- `/proxy/openviking/studio/`
-
-Na karte služby sa pre Orbit zadáva upstream `auth_token`. Pre OpenViking sa zadáva heslo z `openviking-user.env`; backend ho pri login requeste namapuje na platný upstream kľúč z `hermes.env`. Skutočný upstream kľúč sa posiela iba v HTTP hlavičkách, nie v URL ani HTML, a dashboard ho drží iba v pamäti serverovej relácie s `HttpOnly` cookie. Prihlásenie je platné iba pre vybranú službu. OpenViking heslo sa číta pri každom login requeste, takže po jeho zmene netreba reštart dashboardu.
-
-Proxy nie je náhrada za HTTPS ani plnohodnotný používateľský systém. Používaj ho iba v dôveryhodnej LAN; pre internetové vystavenie treba TLS, pevný dashboard login a CSRF ochranu.
+MIT
